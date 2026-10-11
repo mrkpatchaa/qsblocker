@@ -1,6 +1,7 @@
 package com.mrkpatchaa.qsblocker
 
 import android.accessibilityservice.AccessibilityService
+import android.os.SystemClock
 import android.util.Log
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
@@ -9,6 +10,11 @@ class QSBlockerAccessibilityService : AccessibilityService() {
 
     companion object {
         private const val TAG = "QSBlockerService"
+        private const val SYSTEMUI_PACKAGE = "com.android.systemui"
+
+        // Ignore repeat detections while the Edit screen animates closed, so a
+        // second BACK doesn't land in the app underneath the shade
+        private const val BLOCK_COOLDOWN_MS = 500L
 
         // View IDs that exist ONLY when the QS Edit/Customize screen is inflated
         private val QS_EDIT_UNIQUE_IDS = listOf(
@@ -39,6 +45,8 @@ class QSBlockerAccessibilityService : AccessibilityService() {
         )
     }
 
+    private var lastBlockTime = 0L
+
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
         if (event == null) return
 
@@ -61,6 +69,7 @@ class QSBlockerAccessibilityService : AccessibilityService() {
         if (!activeWindows.isNullOrEmpty()) {
             for (window in activeWindows) {
                 val root = window.root ?: continue
+                if (root.packageName?.toString() != SYSTEMUI_PACKAGE) continue
                 if (checkNodeForQsEditScreen(root)) {
                     Log.d(TAG, "QS Edit screen detected in window: ${window.title}")
                     blockQuickSettingsEditing()
@@ -70,7 +79,7 @@ class QSBlockerAccessibilityService : AccessibilityService() {
         } else {
             // Fallback to rootInActiveWindow
             val rootNode = rootInActiveWindow
-            if (rootNode != null) {
+            if (rootNode != null && rootNode.packageName?.toString() == SYSTEMUI_PACKAGE) {
                 if (checkNodeForQsEditScreen(rootNode)) {
                     Log.d(TAG, "QS Edit screen detected in rootInActiveWindow")
                     blockQuickSettingsEditing()
@@ -139,6 +148,10 @@ class QSBlockerAccessibilityService : AccessibilityService() {
     }
 
     private fun blockQuickSettingsEditing() {
+        val now = SystemClock.uptimeMillis()
+        if (now - lastBlockTime < BLOCK_COOLDOWN_MS) return
+        lastBlockTime = now
+
         // Press BACK to exit the edit screen and return to normal Quick Settings panel
         performGlobalAction(GLOBAL_ACTION_BACK)
     }
